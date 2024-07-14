@@ -1,11 +1,11 @@
 package com.hiddentao.cordova.filepath;
 
-
 import android.Manifest;
 import android.content.ContentUris;
 import android.content.Context;
 import android.content.pm.PackageManager;
 import android.net.Uri;
+import android.os.Build;
 import android.provider.OpenableColumns;
 import android.util.Log;
 import android.database.Cursor;
@@ -18,7 +18,6 @@ import org.apache.cordova.CallbackContext;
 import org.apache.cordova.CordovaInterface;
 import org.apache.cordova.CordovaPlugin;
 import org.apache.cordova.CordovaWebView;
-import org.apache.cordova.PermissionHelper;
 import org.json.JSONArray;
 import org.json.JSONObject;
 import org.json.JSONException;
@@ -44,14 +43,10 @@ public class FilePath extends CordovaPlugin {
 
     private static CallbackContext callback;
     private static String uriStr;
-    
+
     public static final int READ_REQ_CODE = 0;
-    
+
     public static final String READ = Manifest.permission.READ_EXTERNAL_STORAGE;
-    
-    protected void getReadPermission() {
-        PermissionHelper.requestPermission(this, FilePath.READ_REQ_CODE, READ);
-    }
 
     public void initialize(CordovaInterface cordova, final CordovaWebView webView) {
         super.initialize(cordova, webView);
@@ -71,27 +66,24 @@ public class FilePath extends CordovaPlugin {
             callback = callbackContext;
             uriStr = args.getString(0);
 
-            if (PermissionHelper.hasPermission(this, READ)) {
-                cordova.getThreadPool().execute(new Runnable() {
-                    @Override
-                    public void run() {
-                        try {
-                            resolveNativePath(callbackContext, args.getString(0));
-                        } catch (JSONException e) {
-                            callbackContext.error(e.getMessage());
-                        }
-                    }
-                });
-            }
-            else {
-                getReadPermission();
+            // Android 14 newer don't need READ_EXTERNAL_STORAGE permission
+            if (Build.VERSION.SDK_INT < Build.VERSION_CODES.TIRAMISU && !cordova.hasPermission(READ)) {
+                cordova.requestPermission(this, FilePath.READ_REQ_CODE, READ);
+                return true;
             }
 
+            cordova.getThreadPool().execute(() -> {
+                try {
+                    resolveNativePath(callbackContext, args.getString(0));
+                } catch (JSONException e) {
+                    callbackContext.error(e.getMessage());
+                }
+            });
             return true;
         }
         else {
             JSONObject resultObj = new JSONObject();
-            
+
             resultObj.put("code", INVALID_ACTION_ERROR_CODE);
             resultObj.put("message", "Invalid action.");
 
@@ -100,7 +92,7 @@ public class FilePath extends CordovaPlugin {
 
         return false;
     }
-    
+
     public void resolveNativePath(CallbackContext callback, String uriStr) throws JSONException {
         JSONObject resultObj = new JSONObject();
         /* content:///... */
@@ -130,19 +122,19 @@ public class FilePath extends CordovaPlugin {
             callback.success("file://" + filePath);
         }
     }
-    
+
     public void onRequestPermissionResult(int requestCode, String[] permissions, int[] grantResults) throws JSONException {
         for (int r:grantResults) {
             if (r == PackageManager.PERMISSION_DENIED) {
                 JSONObject resultObj = new JSONObject();
                 resultObj.put("code", 3);
                 resultObj.put("message", "Filesystem permission was denied.");
-                
+
                 callback.error(resultObj);
                 return;
             }
         }
-        
+
         if (requestCode == READ_REQ_CODE) {
             resolveNativePath(callback, uriStr);
         }
@@ -295,7 +287,7 @@ public class FilePath extends CordovaPlugin {
             if (isExternalStorageDocument(uri)) {
                 final String[] split = docId.split(":");
                 String fullPath = getPathFromExtSD(split);
-                if (!fullPath.equals("")) {
+                if (!fullPath.isEmpty()) {
                     return fullPath;
                 }
                 else {
@@ -385,10 +377,10 @@ public class FilePath extends CordovaPlugin {
     private static String copyFileToInternal(Uri uri, Context context){
         Cursor returnCursor = context.getContentResolver().query(uri, null, null, null, null);
         /*
-        * Get the column indexes of the data in the Cursor,
-        *     * move to the first row in the Cursor, get the data,
-        *     * and display it.
-        * */
+         * Get the column indexes of the data in the Cursor,
+         *     * move to the first row in the Cursor, get the data,
+         *     * and display it.
+         * */
         int nameIndex = returnCursor.getColumnIndex(OpenableColumns.DISPLAY_NAME);
         returnCursor.moveToFirst();
         String name = (returnCursor.getString(nameIndex));
